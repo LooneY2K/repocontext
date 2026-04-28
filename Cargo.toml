@@ -4,6 +4,7 @@ members = [
     "crates/repocontext-cli",
     "crates/repocontext-core",
     "crates/repocontext-lang-ts",
+    "crates/repocontext-lang-go",
     "crates/repocontext-enrich",
 ]
 
@@ -34,6 +35,7 @@ regex = "1"
 notify = "6"
 tree-sitter = "0.22"
 tree-sitter-typescript = "0.21"
+tree-sitter-go = "0.21"
 streaming-iterator = "0.1"
 
 # Stage 2 — declared centrally for visibility; pulled in only by crates that opt in

@@ -209,7 +209,8 @@ fn write_modules_section(out: &mut String, input: &SynthesisInput<'_>) {
         ));
 
         out.push_str("#### Exports\n\n");
-        out.push_str("```typescript\n");
+        let fence = majority_fence(symbols.iter().map(|s| s.file_path.as_path()));
+        out.push_str(&format!("```{fence}\n"));
         let mut top_level: Vec<_> = symbols
             .iter()
             .filter(|s| s.symbol.parent.is_none())
@@ -259,7 +260,8 @@ fn write_data_models_section(out: &mut String, input: &SynthesisInput<'_>) {
         return;
     }
 
-    out.push_str("```typescript\n");
+    let fence = majority_fence(models.iter().map(|s| s.file_path.as_path()));
+    out.push_str(&format!("```{fence}\n"));
     for m in &models {
         if let Some(doc) = &m.symbol.doc_comment {
             out.push_str(doc);
@@ -335,9 +337,39 @@ fn format_key_impl_entry(s: &ScoredSymbol) -> String {
     let refs = s.reference_count;
     let sal = s.salience;
     let src = &s.symbol.source;
+    let fence = code_fence_for_path(&s.file_path);
     format!(
-        "### `{parent}{name}` in {path}\n\nReferences: {refs} sites\nSalience: {sal:.2}\n\n```typescript\n{src}\n```\n\n",
+        "### `{parent}{name}` in {path}\n\nReferences: {refs} sites\nSalience: {sal:.2}\n\n```{fence}\n{src}\n```\n\n",
     )
+}
+
+/// Map a file path to a Markdown code fence language tag. Defaults to
+/// `typescript` for unknown extensions — that's the most likely fallback for
+/// `.js`, `.mts`, `.cts`, etc., that we don't currently parse.
+fn code_fence_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("go") => "go",
+        _ => "typescript",
+    }
+}
+
+/// Pick the majority code-fence language across a set of paths. Used for
+/// per-section code blocks (Exports, Data Models) where multiple symbols from
+/// possibly different files share a single fence.
+fn majority_fence<'a, I: IntoIterator<Item = &'a Path>>(paths: I) -> &'static str {
+    let mut go = 0usize;
+    let mut ts = 0usize;
+    for p in paths {
+        match code_fence_for_path(p) {
+            "go" => go += 1,
+            _ => ts += 1,
+        }
+    }
+    if go > ts {
+        "go"
+    } else {
+        "typescript"
+    }
 }
 
 fn write_end_marker(out: &mut String) {

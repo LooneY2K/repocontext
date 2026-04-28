@@ -26,9 +26,10 @@ pub fn run_stage1(repo_root: &Path, cfg: &Config) -> Result<Stage1Output> {
 
     let mut indexed = Vec::new();
     for f in &discovered {
-        if !is_typescript_file(&f.relative_path) {
-            continue;
-        }
+        let lang = match SourceLang::from_path(&f.relative_path) {
+            Some(l) => l,
+            None => continue, // file extension we don't support
+        };
         let source = match std::fs::read_to_string(&f.absolute_path) {
             Ok(s) => s,
             Err(e) => {
@@ -36,7 +37,11 @@ pub fn run_stage1(repo_root: &Path, cfg: &Config) -> Result<Stage1Output> {
                 continue;
             }
         };
-        let extracted = match repocontext_lang_ts::extract_file(&source, &f.relative_path) {
+        let extract_result = match lang {
+            SourceLang::TypeScript => repocontext_lang_ts::extract_file(&source, &f.relative_path),
+            SourceLang::Go => repocontext_lang_go::extract_file(&source, &f.relative_path),
+        };
+        let extracted = match extract_result {
             Ok(e) => e,
             Err(e) => {
                 warn!("extract failed for {}: {:#}", f.relative_path.display(), e);
@@ -60,7 +65,10 @@ pub fn run_stage1(repo_root: &Path, cfg: &Config) -> Result<Stage1Output> {
     let scored = score_all(&indexed);
     debug!("scored {} symbols", scored.len());
 
-    let project_metadata = metadata::collect_metadata(repo_root);
+    let mut project_metadata = metadata::collect_metadata(repo_root);
+    // Override the default language with what we actually indexed — gives a
+    // more accurate picture for mixed or Go-only projects.
+    project_metadata.primary_language = metadata::primary_language_from_files(&indexed);
     let readme = metadata::read_readme_excerpt(repo_root);
 
     let input = SynthesisInput {
@@ -86,9 +94,18 @@ pub struct Stage1Output {
     pub scored: Vec<ScoredSymbol>,
 }
 
-fn is_typescript_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("ts") | Some("tsx") | Some("mts") | Some("cts")
-    )
+#[derive(Debug, Clone, Copy)]
+enum SourceLang {
+    TypeScript,
+    Go,
+}
+
+impl SourceLang {
+    fn from_path(path: &Path) -> Option<Self> {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("ts") | Some("tsx") | Some("mts") | Some("cts") => Some(Self::TypeScript),
+            Some("go") => Some(Self::Go),
+            _ => None,
+        }
+    }
 }

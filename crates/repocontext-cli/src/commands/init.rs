@@ -17,7 +17,9 @@ max_tokens = 8000
 
 [include]
 paths = ["."]
-languages = ["typescript"]
+# Informational; the orchestrator dispatches by file extension.
+# Supported in this build: "typescript" (.ts, .tsx, .mts, .cts), "go" (.go).
+languages = ["typescript", "go"]
 
 [exclude]
 paths = [

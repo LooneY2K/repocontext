@@ -55,7 +55,10 @@ pub fn extract(source: &str, language: Language) -> Result<ExtractedSymbols> {
     let matches = cursor.matches(&query, root, source.as_bytes());
 
     let mut symbols = Vec::new();
-    let mut seen: HashSet<(usize, usize, SymbolKind)> = HashSet::new();
+    // Dedup key includes the symbol name so multi-declarator statements like
+    // `export const a = 1, b = 2;` (both variable_declarators share the same
+    // def_node) produce two distinct symbols rather than collapsing.
+    let mut seen: HashSet<(usize, usize, String, SymbolKind)> = HashSet::new();
 
     for m in matches {
         let mut caps: HashMap<&str, Node> = HashMap::new();
@@ -64,7 +67,12 @@ pub fn extract(source: &str, language: Language) -> Result<ExtractedSymbols> {
         }
 
         if let Some(symbol) = build_symbol(&caps, source, &comments)? {
-            let key = (symbol.start_byte, symbol.end_byte, symbol.kind);
+            let key = (
+                symbol.start_byte,
+                symbol.end_byte,
+                symbol.name.clone(),
+                symbol.kind,
+            );
             if seen.insert(key) {
                 symbols.push(symbol);
             }

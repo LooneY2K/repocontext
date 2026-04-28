@@ -1,0 +1,14 @@
+[package]
+name = "repocontext-lang-go"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Go symbol extraction for repocontext, via tree-sitter."
+
+[dependencies]
+anyhow.workspace = true
+tree-sitter.workspace = true
+tree-sitter-go.workspace = true
+repocontext-core = { path = "../repocontext-core" }
