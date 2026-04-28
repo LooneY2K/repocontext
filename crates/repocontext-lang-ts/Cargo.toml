@@ -1,0 +1,14 @@
+[package]
+name = "repocontext-lang-ts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "TypeScript and TSX symbol extraction for repocontext, via tree-sitter."
+
+[dependencies]
+anyhow.workspace = true
+tree-sitter.workspace = true
+tree-sitter-typescript.workspace = true
+repocontext-core = { path = "../repocontext-core" }

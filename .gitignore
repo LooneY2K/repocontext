@@ -1,0 +1,15 @@
+# repocontext
+.repocontext/        # enrich cache dir (Stage 2; will hold enrich-cache.json)
+context_temp.md      # Stage 1 output — regenerate any time
+context.md           # Stage 2 output — regenerate any time
+
+# Rust build artifacts
+/target/
+/target/*
+
+# Optional: ignore any model files you happen to download into the repo
+*.gguf
+
+# IDEs
+.idea/
+.vscode/

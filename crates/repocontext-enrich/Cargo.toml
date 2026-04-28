@@ -1,0 +1,13 @@
+[package]
+name = "repocontext-enrich"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Stage 2 LLM enrichment for repocontext: embedded inference, chunking, pluggable cache."
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

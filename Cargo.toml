@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/repocontext-cli",
+    "crates/repocontext-core",
+    "crates/repocontext-lang-ts",
+    "crates/repocontext-enrich",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+authors = ["repocontext contributors"]
+
+[workspace.dependencies]
+# Universal
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Stage 1
+toml = "0.8"
+ignore = "0.4"
+globset = "0.4"
+sha2 = "0.10"
+regex = "1"
+notify = "6"
+tree-sitter = "0.22"
+tree-sitter-typescript = "0.21"
+streaming-iterator = "0.1"
+
+# Stage 2 — declared centrally for visibility; pulled in only by crates that opt in
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+indicatif = "0.17"
+dirs = "5"
+redis = { version = "0.27", features = ["json"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+# llama-cpp-2 added in phase 11 (compiles llama.cpp from source — held back to avoid
+# slowing down phase 1–10 dev loops)
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+is-terminal = "0.4"
+
+# Tests
+insta = { version = "1", features = ["yaml"] }
+tempfile = "3"
+wiremock = "0.6"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
