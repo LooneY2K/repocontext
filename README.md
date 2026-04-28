@@ -1,215 +1,194 @@
 # repocontext
 
-A two-stage CLI that produces structured Markdown context for codebases — built for use as input to AI tools (Claude, ChatGPT, Cursor, etc.).
+> Turn any codebase into a rich AI-ready context document — locally, privately, in seconds.
 
-- **Stage 1 (deterministic):** parses the codebase with `tree-sitter`, extracts symbols and signatures, and writes `context_temp.md`. Fast, reproducible, no LLM involved.
-- **Stage 2 (embedded LLM, opt-in):** loads `qwen2.5-coder:7b` (Q4_K_M GGUF) in-process via `llama.cpp`, reads `context_temp.md`, and produces `context.md` describing the **description, flow, and business logic** of the codebase. Code blocks are copied verbatim — the model never reproduces code.
+`repocontext` is a Rust CLI that produces two files from your codebase:
 
-Language support: TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`) and Go (`.go`). Adding more is a drop-in via a new `repocontext-lang-*` crate.
+| File | What it contains | How fast |
+|------|-----------------|----------|
+| `context_temp.md` | Structural snapshot: every exported symbol, type signature, doc comment, directory layout, and salience-ranked implementation | ~1–2 seconds on any size repo |
+| `context.md` | Narrative document: business logic, architecture, module purposes, domain model — written by a local LLM | ~3–10 minutes first run, instant thereafter (cached) |
 
-## Quick start (Stage 1 only — no LLM required)
+Everything runs on your machine. No telemetry. No cloud APIs. The only network call is the one-time model download.
+
+## Features
+
+- **Deterministic Stage 1** — `context_temp.md` is byte-identical across runs on the same input, making it safe to commit and diff in pull requests.
+- **Embedded LLM** — `qwen2.5-coder:7b` runs in-process via `llama.cpp`. No Ollama, no Docker, no external runtime.
+- **Metal + CUDA acceleration** — runs fast on Apple Silicon (M1/M2/M3) and NVIDIA GPUs.
+- **Intelligent chunking** — when a codebase section is too large for the model's context window, it's deterministically sub-split. Every section always appears in the output, even if the LLM fails for that chunk.
+- **Content-hash cache** — each LLM response is cached by SHA-256 of the input. Re-runs are instant. Commit the cache file so CI works without an LLM runtime.
+- **TypeScript + Go** — `.ts`, `.tsx`, `.mts`, `.cts`, and `.go` files are parsed with tree-sitter. More languages are a drop-in extension.
+- **No lock-in** — the output is plain Markdown. Use it with any AI tool.
+
+## Quick start
+
+### Stage 1 only (no LLM, no model download)
 
 ```sh
-# from this repo
 cargo install --path crates/repocontext-cli
 
-# in any TypeScript or Go project
-repocontext init           # writes .repocontext.toml + appends .gitignore
-repocontext generate       # walks, parses, writes context_temp.md
-repocontext check          # exit 0 if context_temp.md is up to date, 1 if stale
-repocontext extract        # debug: dump the indexed file set + scored symbols as JSON
+cd /your/project
+repocontext init       # create .repocontext.toml and add to .gitignore
+repocontext generate   # write context_temp.md
+repocontext check      # exit 0 if current, 1 if stale (useful in CI)
 ```
 
-Stage 1 alone is enough for many use cases — `context_temp.md` is a structured, deterministic snapshot of every exported symbol, the directory layout, the data models, and the highest-salience implementations (ranked by cross-file reference count).
+`context_temp.md` is ready to paste into any AI chat as context. It contains every exported function, type, and class with full signatures and doc comments, ranked by how widely each symbol is referenced across the codebase.
 
-For large repos, raise the token budget in `.repocontext.toml`:
+### Stage 2 — real LLM narrative
 
-```toml
-[output]
-max_tokens = 80000
-```
+Stage 2 writes `context.md`, a human-readable document describing what the codebase *does* and *why* — not just what symbols exist.
 
-## Enabling Stage 2 (real LLM narrative)
-
-Stage 2 produces `context.md` — a polished narrative describing the project's purpose, architecture, modules, domain model, and key behaviours. It runs `qwen2.5-coder:7b` locally via embedded `llama.cpp`. Nothing leaves your machine except the one-time model download from Hugging Face.
-
-### 1. Build with the inference feature
+**Step 1: build with inference enabled**
 
 ```sh
-# Apple Silicon (Metal-accelerated, recommended)
+# Apple Silicon (recommended — Metal-accelerated)
 cargo install --path crates/repocontext-cli --features inference-metal
 
-# NVIDIA GPUs (requires CUDA toolkit at build time)
+# NVIDIA GPU (requires CUDA toolkit installed at build time)
 cargo install --path crates/repocontext-cli --features inference-cuda
 
-# CPU-only
+# CPU-only (works everywhere, slower)
 cargo install --path crates/repocontext-cli --features inference
 ```
 
-The first build is slow (~5–15 minutes) because `llama.cpp` compiles from C++ source. Subsequent rebuilds are incremental.
+The first build compiles `llama.cpp` from C++ source (~5–15 minutes). Subsequent rebuilds are incremental.
 
-### 2. Pull the model
+**Step 2: download the model**
 
 ```sh
 repocontext model pull
-# downloads ~4.5 GB to ~/.cache/repocontext/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+# Downloads ~4.5 GB to ~/Library/Caches/repocontext/models/ (macOS)
+#                    or ~/.cache/repocontext/models/          (Linux)
 ```
 
-Other model commands:
-
-```sh
-repocontext model list      # show what's cached + sizes
-repocontext model remove    # delete the configured model
-```
-
-### 3. Generate `context.md`
+**Step 3: generate**
 
 ```sh
 repocontext generate --enrich
 ```
 
-What happens:
+The first run sends each chunk through the LLM and caches every response. Second run is instant — the cache serves everything without loading the model.
 
-1. Stage 1 runs → `context_temp.md`.
-2. Chunker splits `context_temp.md` by section markers (`<!-- repocontext:section=… -->`). Modules that exceed the model's context window are sub-split deterministically.
-3. Each chunk's prompt is rendered (templates in `prompts/`) and sent to the local Qwen.
-4. Outputs are cached by SHA-256 of `(prompt_version, model_id, chunk_input)` to `.repocontext/enrich-cache.json`. Re-running with the same source code is a no-op (every chunk hits the cache).
-5. Outputs are stitched into `context.md` with sections: `# Project`, `## Architecture`, `## Modules`, `## Domain Model`, `## Key Behaviors`. Code blocks are copied verbatim from `context_temp.md`.
+## Hardware requirements
 
-### Coverage guarantee
+| Setup | RAM | Speed |
+|-------|-----|-------|
+| CPU-only | 16 GB minimum | ~10–30 tokens/s |
+| Apple Silicon M1+ | 16 GB unified memory | ~40–80 tokens/s |
+| NVIDIA RTX 4060 (8 GB VRAM) | 8 GB VRAM + 8 GB system | ~50–100 tokens/s |
 
-Every section in `context_temp.md` produces a corresponding section in `context.md`, even when the LLM fails. On any error path (timeout, malformed response, panic, missing model), the affected section gets a deterministic placeholder — never a silent drop. This is enforced by an integration test (`coverage_under_total_failure`).
+A medium-sized repo with ~20 chunks typically takes 3–8 minutes on first run and under a second on every subsequent run.
 
-### Prompt iteration without firing the LLM
+## Commands
 
-```sh
-repocontext generate --enrich --dry-run-llm
+```
+repocontext init                              Create .repocontext.toml
+repocontext generate                          Stage 1 only → context_temp.md
+repocontext generate --enrich                 Stage 1 + 2 → context_temp.md + context.md
+repocontext generate --enrich --dry-run-llm   Log prompts to stdout without calling the LLM
+repocontext generate --enrich --no-cache      Bypass the cache this run
+repocontext check                             Exit 0 if context_temp.md is current, 1 if stale
+repocontext check --enrich                    Also validate context.md via cache
+repocontext extract                           Dump indexed symbols as JSON (debug)
+repocontext model pull                        Download the default model
+repocontext model list                        Show cached models and sizes
+repocontext model remove                      Delete the configured model file
 ```
 
-Logs every rendered prompt to stdout instead of calling the model. Paste a prompt into LM Studio / Jan / koboldcpp to test it manually, edit the corresponding `prompts/chunk_*.md` file, bump its `# version:` (which invalidates that task's cache entries), re-run.
+All commands accept `--repo <path>` to target a directory other than the current one, plus `--quiet` and `--verbose`.
 
-## Hardware
+## Configuration
 
-- **CPU-only**: 16 GB RAM minimum for Q4_K_M. Expect ~10–30 tokens/s.
-- **Apple Silicon (M1+)**: Metal kicks in automatically with `--features inference-metal`. ~30–60 tokens/s on M2 Pro.
-- **NVIDIA RTX 4060 / 8 GB VRAM**: comfortable; needs `--features inference-cuda` and the CUDA toolkit at build time.
-- **Disk**: ~5 GB free for the model cache (`~/.cache/repocontext/models/`).
-- **Build toolchain**: a C++ compiler (Xcode CLT on macOS, `build-essential` on Linux, Visual Studio build tools on Windows) is required because `llama.cpp` compiles from source.
-
-A typical Stage 2 run on a medium repo is ~20 chunks × ~150 tokens ≈ 5 minutes on CPU-only, sub-minute on Metal. The cache makes second runs trivial.
-
-## Cache backends
-
-`.repocontext.toml` controls the cache:
-
-```toml
-[enrich.cache]
-backend = "json"                              # "json" | "redis"
-path = ".repocontext/enrich-cache.json"       # used when backend = "json"
-url = "redis://localhost:6379"                # used when backend = "redis"
-key_prefix = "repocontext:"                   # used when backend = "redis"
-```
-
-- **`json`** (default): a flat JSON file under `.repocontext/`. Zero-config, human-readable, and committable to git so `repocontext check --enrich` works in CI without an LLM runtime.
-- **`redis`**: opt-in. Useful for **shared team caches** — point everyone's `redis://` URL at the same instance and re-runs across the team hit the same cache. Connect lazily; the first failed connection surfaces an actionable error (`brew services start redis`).
-
-To use Redis:
-
-```sh
-brew services start redis      # or `redis-server`
-# edit .repocontext.toml: backend = "redis"
-repocontext generate --enrich
-redis-cli keys "repocontext:*" # cached entries visible
-```
-
-## Configuration reference
+`repocontext init` writes a `.repocontext.toml` with all defaults. Every field is optional.
 
 ```toml
 [output]
 temp_path = "context_temp.md"
 final_path = "context.md"
-profile = "full"
-max_tokens = 8000              # bump for large repos (the chunker handles oversize sections)
-
-[include]
-paths = ["."]
-languages = ["typescript", "go"]   # informational; orchestrator dispatches by file extension
+max_tokens = 8000              # raise for large repos
 
 [exclude]
-paths = ["**/test/**", "**/*.test.ts", "**/*.spec.ts", "**/*.generated.*"]
-
-[synthesis]
-include_doc_comments = true
-include_implementation_for_top_n = 10
-deterministic_ordering = true
+paths = [
+    "**/test/**",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/*.generated.*",
+]
 
 [enrich]
-enabled = false
-max_tokens_per_request = 400
-temperature = 0.2
-seed = 42
-timeout_seconds = 120
-max_concurrent_requests = 1
-chunk_strategy = "by_section"
+temperature = 0.2              # lower = more focused output
+max_tokens_per_request = 400   # max tokens per LLM response chunk
+context_size = 4096            # model context window
+
+[enrich.cache]
+backend = "json"               # "json" (default) or "redis"
+path = ".repocontext/enrich-cache.json"
 
 [enrich.model]
 name = "qwen2.5-coder-7b-instruct"
 quantization = "q4_k_m"
-context_size = 4096
-gpu_layers = -1                # -1 = auto (Metal on macOS, CPU otherwise)
-# path_override = "/custom/path/to/model.gguf"
-# cache_dir = "/custom/cache/dir"
-
-[enrich.cache]
-backend = "json"
-path = ".repocontext/enrich-cache.json"
-url = "redis://localhost:6379"
-key_prefix = "repocontext:"
-
-[profiles.minimal]
-max_tokens = 1500
-
-[profiles.api_only]
-sections = ["overview", "data_models"]
+# path_override = "/path/to/custom.gguf"
 ```
 
-Profiles let you switch between full and trimmed views: `repocontext generate --profile minimal`.
+## Cache backends
+
+**JSON (default):** A flat file at `.repocontext/enrich-cache.json`. Human-readable, committable to git, zero infrastructure required.
+
+**Redis (opt-in):** Useful when multiple developers share a codebase — everyone gets cache hits for code they didn't touch. Connects lazily with a clear actionable error if the server isn't running.
+
+```toml
+[enrich.cache]
+backend = "redis"
+url = "redis://localhost:6379"
+key_prefix = "repocontext:"
+```
 
 ## CI usage
 
-`repocontext check` is the CI entrypoint. Run it after build:
+Stage 1 check (no LLM required):
 
 ```yaml
-# GitHub Actions example
-- run: cargo install --path crates/repocontext-cli   # or download a release binary
-- run: repocontext check                              # Stage 1 only
-- run: repocontext check --enrich                     # also validates context.md via cache
+- run: repocontext check
 ```
 
-To enable `check --enrich` in CI without an LLM runtime: remove `.repocontext/` from `.gitignore` and commit `enrich-cache.json` after each Stage 2 run. The cache is content-hash keyed, so it only changes when source changes meaningfully.
+Stage 2 check without running the LLM: remove `.repocontext/` from `.gitignore` and commit `enrich-cache.json` after each local Stage 2 run. The cache is content-hash keyed, so it only changes when the underlying source changes meaningfully.
+
+```yaml
+- run: repocontext check --enrich   # validates against committed cache, no inference needed
+```
+
+## Prompt iteration
+
+To iterate on LLM output quality without running inference each time:
+
+```sh
+repocontext generate --enrich --dry-run-llm
+```
+
+This logs every rendered prompt to stdout without calling the model. Paste a prompt into any local inference UI (LM Studio, Jan, koboldcpp), iterate on the wording, edit the corresponding template in `prompts/`, bump its `# version:` line (which invalidates that task's cache entries), then re-run.
+
+## Supported languages
+
+| Language | Extensions |
+|----------|-----------|
+| TypeScript | `.ts` `.tsx` `.mts` `.cts` |
+| Go | `.go` |
+
+Adding a new language requires one crate implementing a single `extract(source, path) -> ExtractedSymbols` function.
 
 ## Privacy
 
-Everything runs locally. The only network call is the one-time GGUF download from Hugging Face. Model + inference + cache are all local — no telemetry, no remote LLM APIs.
+All inference runs locally. Nothing is sent to external servers. The only outbound request is the one-time model download from Hugging Face. `context_temp.md` and `context.md` never leave your machine unless you explicitly share them.
 
-## Layout
+## Build requirements
 
-```
-repocontext/
-├── crates/
-│   ├── repocontext-cli/        # binary crate (clap)
-│   ├── repocontext-core/       # config, walker, salience, Stage 1 synthesis
-│   ├── repocontext-lang-ts/    # tree-sitter TypeScript/TSX extractor
-│   ├── repocontext-lang-go/    # tree-sitter Go extractor
-│   └── repocontext-enrich/     # Stage 2: chunker, cache (JSON+Redis), inference, assembler
-├── prompts/                    # versioned prompt templates (loaded via include_str!)
-└── tests/fixtures/             # sample TS / Go projects for integration tests
-```
+A C++ compiler is required because `llama.cpp` compiles from source at install time:
 
-## Status
-
-- Stage 1 (deterministic): ✅ shipped (TypeScript + Go).
-- Stage 2 (embedded LLM): ✅ wired end-to-end. With `--features inference-metal` (or `inference-cuda` / `inference`) plus the model pulled, `--enrich` produces real Qwen-generated narratives. Without the feature, the same flag falls back to a deterministic `MockBackend` (placeholder content) so the pipeline can be verified without paying the C++ compile cost.
+- **macOS** — Xcode Command Line Tools (`xcode-select --install`)
+- **Linux** — `build-essential` (Debian/Ubuntu) or equivalent
+- **Windows** — Visual Studio Build Tools with C++ workload
 
 ## License
 
