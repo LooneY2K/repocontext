@@ -7,6 +7,11 @@ context.md           # Stage 2 output — regenerate any time
 /target/
 /target/*
 
+# MacOS
+.DS_Store
+
+.claude/
+.claude/*
 # Optional: ignore any model files you happen to download into the repo
 *.gguf
 

@@ -7,7 +7,34 @@ rust-version.workspace = true
 authors.workspace = true
 description = "Stage 2 LLM enrichment for repocontext: embedded inference, chunking, pluggable cache."
 
+[features]
+default = []
+# Compile llama-cpp-2 (and llama.cpp from source) for real GGUF inference.
+# Adds 5-15 min to first build. Without this feature, the LlamaCppBackend
+# is a stub that errors on construction.
+inference = ["dep:llama-cpp-2"]
+# Apple Silicon: enable Metal acceleration (auto-detected at runtime on
+# macOS; pulls in the Metal-specific C bindings at compile time).
+inference-metal = ["inference", "llama-cpp-2/metal"]
+# NVIDIA GPUs: requires the CUDA toolkit at build time. Off by default since
+# most contributors don't have it installed.
+inference-cuda = ["inference", "llama-cpp-2/cuda"]
+
 [dependencies]
 anyhow.workspace = true
+thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+regex.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+indicatif.workspace = true
+dirs.workspace = true
+redis.workspace = true
+llama-cpp-2 = { workspace = true, optional = true }
+repocontext-core = { path = "../repocontext-core" }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -65,13 +65,36 @@ enum Command {
 
     /// Run Stage 1 (and Stage 2 if `--enrich`).
     Generate {
-        /// Run Stage 2 enrichment after Stage 1 (not yet implemented in this build).
+        /// Run Stage 2 enrichment after Stage 1.
+        ///
+        /// Until phase 19 ships embedded inference, --enrich uses a deterministic
+        /// MockBackend that produces structural placeholders. Real LLM output
+        /// (Qwen2.5-Coder via llama.cpp) is wired in by phase 19.
         #[arg(long)]
         enrich: bool,
 
         /// Override `[output].temp_path`.
         #[arg(long)]
         output_temp: Option<PathBuf>,
+
+        /// Override `[output].final_path` (the context.md path).
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Bypass the enrichment cache for this run (read & write).
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Log the rendered prompt for every chunk to stdout instead of
+        /// calling the LLM. Useful for prompt iteration with an external GUI
+        /// (LM Studio, Jan, koboldcpp).
+        #[arg(long = "dry-run-llm")]
+        dry_run_llm: bool,
+
+        /// Override the GGUF model path. Defaults to the configured cache
+        /// dir + filename. Only consulted when `inference` feature is built in.
+        #[arg(long)]
+        model_path: Option<PathBuf>,
     },
 
     /// Re-synthesize Stage 1 in memory and compare against the file on disk.
@@ -81,6 +104,26 @@ enum Command {
     /// Dump the indexed file set as JSON to stdout. Hidden from default help.
     #[command(hide = true)]
     Extract,
+
+    /// Manage cached GGUF model files (Stage 2 inference).
+    Model {
+        #[command(subcommand)]
+        cmd: ModelCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ModelCommand {
+    /// Download the configured model (default: qwen2.5-coder-7b-instruct, ~4.5 GB).
+    Pull,
+    /// List cached model files with sizes.
+    List,
+    /// Remove a cached model file. Defaults to the configured one.
+    Remove {
+        /// Override the file name to remove (relative to the cache dir).
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -113,9 +156,29 @@ fn run(cli: &Cli) -> Result<u8> {
         Command::Generate {
             enrich,
             output_temp,
-        } => commands::generate::run(&cli.repo, &config_path, *enrich, output_temp.as_deref()),
+            output,
+            no_cache,
+            dry_run_llm,
+            model_path,
+        } => commands::generate::run(
+            &cli.repo,
+            &config_path,
+            *enrich,
+            output_temp.as_deref(),
+            output.as_deref(),
+            *no_cache,
+            *dry_run_llm,
+            model_path.as_deref(),
+        ),
         Command::Check => commands::check::run(&cli.repo, &config_path),
         Command::Extract => commands::extract::run(&cli.repo, &config_path),
+        Command::Model { cmd } => match cmd {
+            ModelCommand::Pull => commands::model::pull(&cli.repo, &config_path),
+            ModelCommand::List => commands::model::list(&cli.repo, &config_path),
+            ModelCommand::Remove { name } => {
+                commands::model::remove(&cli.repo, &config_path, name.as_deref())
+            }
+        },
     }
 }
 

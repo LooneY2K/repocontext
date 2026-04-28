@@ -22,6 +22,18 @@ serde_json.workspace = true
 repocontext-core = { path = "../repocontext-core" }
 repocontext-lang-ts = { path = "../repocontext-lang-ts" }
 repocontext-lang-go = { path = "../repocontext-lang-go" }
+repocontext-enrich = { path = "../repocontext-enrich" }
+
+[features]
+default = []
+# Real GGUF inference via llama.cpp. First build is slow (~5-15 min C++ compile).
+inference = ["repocontext-enrich/inference"]
+# Apple Silicon: Metal-accelerated inference. Implies `inference` so the CLI's
+# `cfg(feature = "inference")` gates evaluate to true with a metal-only build.
+inference-metal = ["inference", "repocontext-enrich/inference-metal"]
+# NVIDIA GPUs: requires CUDA toolkit at build time. Implies `inference` for
+# the same reason.
+inference-cuda = ["inference", "repocontext-enrich/inference-cuda"]
 
 [dev-dependencies]
 tempfile.workspace = true

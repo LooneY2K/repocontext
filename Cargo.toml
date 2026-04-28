@@ -39,14 +39,16 @@ tree-sitter-go = "0.21"
 streaming-iterator = "0.1"
 
 # Stage 2 — declared centrally for visibility; pulled in only by crates that opt in
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }
 indicatif = "0.17"
 dirs = "5"
 redis = { version = "0.27", features = ["json"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
-# llama-cpp-2 added in phase 11 (compiles llama.cpp from source — held back to avoid
-# slowing down phase 1–10 dev loops)
+# llama-cpp-2 is wired in via the `inference` feature on repocontext-enrich.
+# Default build leaves it out so contributors don't pay the ~5-15 min C++
+# compile every fresh build. Pin a 0.1 minor since the API moves quickly.
+llama-cpp-2 = { version = "0.1", default-features = false }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
