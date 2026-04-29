@@ -75,10 +75,11 @@ impl LlmBackend for PanicBackend {
         user: &str,
         _params: &CompletionParams,
     ) -> Result<String> {
+        // chars().take() so multi-byte UTF-8 in user content can't panic the formatter.
+        let prefix: String = user.chars().take(120).collect();
         panic!(
             "PanicBackend was called — the cache should have satisfied this chunk. \
-             User prompt prefix: {:?}",
-            &user[..user.len().min(120)]
+             User prompt prefix: {prefix:?}"
         );
     }
 }

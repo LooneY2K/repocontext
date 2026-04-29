@@ -1,5 +1,9 @@
 # repocontext
 
+[![CI](https://github.com/LooneY2K/repocontext/actions/workflows/ci.yml/badge.svg)](https://github.com/LooneY2K/repocontext/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+
 > Turn any codebase into a rich AI-ready context document — locally, privately, in seconds.
 
 `repocontext` is a Rust CLI that produces two files from your codebase:
@@ -10,6 +14,8 @@
 | `context.md` | Narrative document: business logic, architecture, module purposes, domain model — written by a local LLM | ~3–10 minutes first run, instant thereafter (cached) |
 
 Everything runs on your machine. No telemetry. No cloud APIs. The only network call is the one-time model download.
+
+**See an example:** [`examples/sample-context_temp.md`](examples/sample-context_temp.md) — what Stage 1 produces for a small Go service.
 
 ## Features
 
@@ -22,6 +28,8 @@ Everything runs on your machine. No telemetry. No cloud APIs. The only network c
 - **No lock-in** — the output is plain Markdown. Use it with any AI tool.
 
 ## Quick start
+
+> **Build prerequisite:** A C++ compiler is required for any `--features inference*` build because `llama.cpp` compiles from source. macOS: `xcode-select --install`. Debian/Ubuntu: `sudo apt install build-essential cmake pkg-config`. Windows: Visual Studio Build Tools with the C++ workload. Stage-1-only installs (no inference features) only need a Rust toolchain.
 
 ### Stage 1 only (no LLM, no model download)
 
@@ -220,13 +228,9 @@ Adding a new language requires one crate implementing a single `extract(source, 
 
 All inference runs locally. Nothing is sent to external servers. The only outbound request is the one-time model download from Hugging Face. `context_temp.md` and `context.md` never leave your machine unless you explicitly share them.
 
-## Build requirements
+## Contributing
 
-A C++ compiler is required because `llama.cpp` compiles from source at install time:
-
-- **macOS** — Xcode Command Line Tools (`xcode-select --install`)
-- **Linux** — `build-essential` (Debian/Ubuntu) or equivalent
-- **Windows** — Visual Studio Build Tools with C++ workload
+Bug reports, prompt-template improvements, and new language extractors are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 

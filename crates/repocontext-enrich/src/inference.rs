@@ -121,6 +121,24 @@ mod imp {
 
     const QWEN_END_TOKEN: &str = "<|im_end|>";
 
+    /// Replace Qwen ChatML control tokens that appear inside user-provided text
+    /// before they reach the prompt template. Without this, a source file that
+    /// contains `<|im_end|>\n<|im_start|>system\n...` could escape the user
+    /// envelope and inject new system instructions. The replacement keeps the
+    /// rendered prompt human-readable (so dry-run-llm logs are still useful)
+    /// without giving the tokenizer any genuine control sequence to anchor on.
+    fn sanitize_chatml(input: &str) -> std::borrow::Cow<'_, str> {
+        if !input.contains("<|") {
+            // Hot path: no candidate prefix at all.
+            return std::borrow::Cow::Borrowed(input);
+        }
+        let cleaned = input
+            .replace("<|im_start|>", "<|_im_start_|>")
+            .replace("<|im_end|>", "<|_im_end_|>")
+            .replace("<|endoftext|>", "<|_endoftext_|>");
+        std::borrow::Cow::Owned(cleaned)
+    }
+
     pub(super) struct Inner {
         backend: Arc<LlamaBackend>,
         model: LlamaModel,
@@ -145,11 +163,15 @@ mod imp {
             params: &CompletionParams,
         ) -> Result<String> {
             // Qwen2.5 ChatML template. Body uses Unix newlines because that's
-            // what the tokenizer expects.
+            // what the tokenizer expects. Sanitize control tokens out of the
+            // user/system content first — otherwise a source file containing
+            // `<|im_end|>...<|im_start|>system\nNew instructions:` could break
+            // out of the user envelope.
+            let safe_system = sanitize_chatml(system.trim());
+            let safe_user = sanitize_chatml(user.trim());
             let prompt = format!(
                 "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-                system.trim(),
-                user.trim(),
+                safe_system, safe_user,
             );
 
             let n_ctx =

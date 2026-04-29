@@ -35,9 +35,30 @@ const HARDCODED_DIR_EXCLUDES: &[&str] = &[
     ".cache",
 ];
 
+/// File basenames that are always excluded — secrets and machine-generated
+/// dependency lockfiles. Lockfiles aren't "source" so synthesizing them adds
+/// noise; `.env*` files commonly hold credentials and must never reach the
+/// generated context.
+const HARDCODED_FILE_EXCLUDES: &[&str] = &[
+    "Cargo.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Gemfile.lock",
+    "composer.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+];
+
 /// 1 MiB. Files larger than this are skipped entirely (likely generated, vendored,
 /// or otherwise not useful for context).
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Cap the total number of files a walk will return. Default high enough that
+/// any real-world repo fits, low enough that pointing the tool at `/` or a
+/// mounted NFS bails out fast instead of OOMing.
+pub const DEFAULT_MAX_FILES: usize = 50_000;
 
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
@@ -45,6 +66,7 @@ const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 pub struct WalkOptions {
     pub exclude_globs: Vec<String>,
     pub max_file_bytes: u64,
+    pub max_files: usize,
     pub follow_symlinks: bool,
 }
 
@@ -53,6 +75,7 @@ impl Default for WalkOptions {
         Self {
             exclude_globs: Vec::new(),
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+            max_files: DEFAULT_MAX_FILES,
             follow_symlinks: false,
         }
     }
@@ -64,9 +87,23 @@ impl WalkOptions {
         Self {
             exclude_globs: cfg.exclude.paths.clone(),
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+            max_files: DEFAULT_MAX_FILES,
             follow_symlinks: false,
         }
     }
+}
+
+/// True if `name` matches a `.env`-style secrets file. `.env`, `.env.local`,
+/// `.env.production`, etc. — but explicitly NOT `.env.example` /
+/// `.env.template`, which are documentation files commonly committed.
+fn is_env_secret_file(name: &str) -> bool {
+    if name == ".env" {
+        return true;
+    }
+    if let Some(suffix) = name.strip_prefix(".env.") {
+        return !matches!(suffix, "example" | "template" | "sample" | "dist");
+    }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +120,13 @@ pub struct DiscoveredFile {
 /// that pass every filter.
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<Vec<DiscoveredFile>> {
     let exclude_set = build_globset(&opts.exclude_globs)?;
-    let mut walker_builder = WalkBuilder::new(root);
+    // Canonicalize the root so `strip_prefix` is meaningful even when the user
+    // passes a path that contains symlinks or `..`. Fall back to the original
+    // path on canonicalize errors (e.g. permission denied) — the walker will
+    // surface a more specific error a few lines down.
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+
+    let mut walker_builder = WalkBuilder::new(&canonical_root);
     walker_builder
         .standard_filters(true)
         // Don't walk up out of `root` looking for parent .gitignore files —
@@ -111,7 +154,14 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<Vec<DiscoveredFile>> {
             continue;
         }
 
-        let rel = path.strip_prefix(root).unwrap_or(path);
+        // Hardcoded file basename excludes (lockfiles, .env-style secrets).
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if HARDCODED_FILE_EXCLUDES.contains(&name) || is_env_secret_file(name) {
+                continue;
+            }
+        }
+
+        let rel = path.strip_prefix(&canonical_root).unwrap_or(path);
         let rel_normalized = normalize_path(rel);
 
         if exclude_set.is_match(&rel_normalized) {
@@ -135,6 +185,16 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<Vec<DiscoveredFile>> {
             relative_path: rel_normalized,
             size_bytes: size,
         });
+
+        if files.len() > opts.max_files {
+            anyhow::bail!(
+                "walk found more than {} files under {}; raise WalkOptions::max_files \
+                 or narrow [include] paths / [exclude] paths in .repocontext.toml. \
+                 (Pointed at the wrong directory? `repocontext init` writes a root-level config.)",
+                opts.max_files,
+                root.display(),
+            );
+        }
     }
 
     files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
@@ -302,5 +362,64 @@ mod tests {
         let opts = WalkOptions::from_config(&cfg);
         assert_eq!(opts.exclude_globs, vec!["**/*.skip".to_string()]);
         assert_eq!(opts.max_file_bytes, DEFAULT_MAX_FILE_BYTES);
+        assert_eq!(opts.max_files, DEFAULT_MAX_FILES);
+    }
+
+    #[test]
+    fn skips_lockfiles_and_env_secrets() {
+        // Note: WalkBuilder::standard_filters(true) already filters every
+        // dotfile via its `hidden` filter, so `.env*` and `.gitignore` etc.
+        // never reach our hardcoded exclusion check in real walks. The
+        // hardcoded check is still there as defense-in-depth (in case a future
+        // contributor disables `hidden(true)` for some reason). Lockfiles are
+        // NOT dotfiles, so the hardcoded check is the only thing keeping them
+        // out — that's the half this integration test exercises.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write(&root.join("src/main.ts"), b"// app\n");
+        write(&root.join("Cargo.lock"), b"# generated\n");
+        write(&root.join("package-lock.json"), b"{}\n");
+        write(&root.join("yarn.lock"), b"# yarn\n");
+        write(&root.join("pnpm-lock.yaml"), b"# pnpm\n");
+
+        let opts = WalkOptions::default();
+        let files = walk(root, &opts).expect("walk");
+        let names = collect_names(&files);
+        assert!(names.contains(&"src/main.ts".to_string()));
+        assert!(!names.iter().any(|n| n == "Cargo.lock"));
+        assert!(!names.iter().any(|n| n == "package-lock.json"));
+        assert!(!names.iter().any(|n| n == "yarn.lock"));
+        assert!(!names.iter().any(|n| n == "pnpm-lock.yaml"));
+    }
+
+    #[test]
+    fn max_files_cap_returns_actionable_error() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..30 {
+            write(&root.join(format!("f{i}.ts")), b"// x\n");
+        }
+        let opts = WalkOptions {
+            max_files: 10,
+            ..WalkOptions::default()
+        };
+        let err = walk(root, &opts).expect_err("over cap");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("more than 10 files"), "got: {msg}");
+        assert!(msg.contains(".repocontext.toml"), "got: {msg}");
+    }
+
+    #[test]
+    fn is_env_secret_file_distinguishes_secrets_from_templates() {
+        assert!(is_env_secret_file(".env"));
+        assert!(is_env_secret_file(".env.local"));
+        assert!(is_env_secret_file(".env.production"));
+        assert!(is_env_secret_file(".env.staging"));
+        assert!(!is_env_secret_file(".env.example"));
+        assert!(!is_env_secret_file(".env.template"));
+        assert!(!is_env_secret_file(".env.sample"));
+        assert!(!is_env_secret_file(".env.dist"));
+        assert!(!is_env_secret_file("env"));
+        assert!(!is_env_secret_file("foo.env"));
     }
 }

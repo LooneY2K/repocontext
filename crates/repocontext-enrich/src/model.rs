@@ -48,14 +48,24 @@ pub struct ModelDescriptor {
 impl ModelDescriptor {
     /// The default Qwen2.5-Coder 7B Instruct, Q4_K_M quantization, from the
     /// official Qwen Hugging Face repo.
+    ///
+    /// The pinned SHA-256 corresponds to the
+    /// `qwen2.5-coder-7b-instruct-q4_k_m.gguf` artifact published by Qwen on
+    /// Hugging Face. If you need to bump the model, recompute with:
+    ///
+    /// ```sh
+    /// shasum -a 256 ~/.cache/repocontext/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+    /// ```
+    ///
+    /// Mismatches abort the download with an actionable error rather than a
+    /// silent warning — protects users from MITM / mirror tampering.
     pub fn default_qwen() -> Self {
         Self {
             name: "qwen2.5-coder-7b-instruct".to_string(),
             quantization: "q4_k_m".to_string(),
             url: "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf".to_string(),
-            // Empty == skip verification with a warning. Pin once we have
-            // verified the upstream artifact byte-for-byte.
-            sha256: String::new(),
+            sha256: "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c"
+                .to_string(),
             approx_size_bytes: 4_700_000_000,
         }
     }
@@ -113,6 +123,16 @@ pub fn download(
     override_dir: Option<&Path>,
     verify_sha256: bool,
 ) -> Result<PathBuf> {
+    // Refuse plaintext HTTP — the GGUF is a runtime-loaded native library
+    // analogue. Combined with the SHA-256 pin, this defeats the MITM threat
+    // that a hostile DNS or proxy could otherwise mount.
+    if !descriptor.url.starts_with("https://") {
+        bail!(
+            "model URL must use https://, got {:?}. Refusing to download over plaintext HTTP.",
+            descriptor.url
+        );
+    }
+
     let path = resolved_path(descriptor, override_dir)?;
     if path.exists() {
         info!("Model already present at {}", path.display());
@@ -224,12 +244,15 @@ pub fn download(
 }
 
 /// SHA-256 a file and compare to `expected`. Empty `expected` → log a
-/// warning and skip (used while we don't have a pinned hash).
+/// warning and skip (intended only for user-supplied descriptors with
+/// `path_override`, where they're trusting their own GGUF). Built-in
+/// descriptors must always carry a non-empty hash.
 pub fn verify_file_sha256(path: &Path, expected: &str) -> Result<()> {
     if expected.is_empty() {
         warn!(
             "No expected SHA256 set for {}; skipping integrity check. \
-             Pin a hash in ModelDescriptor::sha256 to enable verification.",
+             This is only safe if you supplied the GGUF yourself — \
+             a built-in model descriptor without a pinned hash is a bug.",
             path.display()
         );
         return Ok(());

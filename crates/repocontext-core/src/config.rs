@@ -18,10 +18,10 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Top-level repocontext configuration. All fields default if absent.
@@ -231,14 +231,41 @@ impl Config {
     /// Load a config from a `.repocontext.toml` file.
     ///
     /// If the file doesn't exist, returns [`Config::default`] — this is the
-    /// zero-config path. Other I/O or parse errors propagate.
+    /// zero-config path. Other I/O or parse errors propagate. The returned
+    /// config has been [validated](Self::validate); if it contains forbidden
+    /// path patterns (e.g. `..` parent-directory traversal), this errors.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let s = std::fs::read_to_string(path)
             .with_context(|| format!("reading config from {}", path.display()))?;
-        s.parse()
+        let cfg: Self = s.parse()?;
+        cfg.validate()
+            .with_context(|| format!("validating config at {}", path.display()))?;
+        Ok(cfg)
+    }
+
+    /// Verify path-typed config fields don't contain `..` parent-directory
+    /// components. A hostile `.repocontext.toml` (e.g. one shipped with a
+    /// repository you just cloned) could otherwise point `[output] temp_path`
+    /// at `../../etc/foo` and cause repocontext to write outside the project
+    /// when invoked. Absolute paths are allowed — they're visible in the toml
+    /// and easy for a reviewer to spot.
+    pub fn validate(&self) -> Result<()> {
+        check_no_parent_traversal(&self.output.temp_path, "[output] temp_path")?;
+        check_no_parent_traversal(&self.output.final_path, "[output] final_path")?;
+        check_no_parent_traversal(&self.enrich.cache.path, "[enrich.cache] path")?;
+        if let Some(p) = &self.enrich.model.cache_dir {
+            check_no_parent_traversal(p, "[enrich.model] cache_dir")?;
+        }
+        if let Some(p) = &self.enrich.model.path_override {
+            check_no_parent_traversal(p, "[enrich.model] path_override")?;
+        }
+        for include in &self.include.paths {
+            check_no_parent_traversal(include, "[include] paths entry")?;
+        }
+        Ok(())
     }
 
     /// Resolve the profile named in `output.profile` (or `name` if provided),
@@ -279,9 +306,60 @@ impl FromStr for Config {
     }
 }
 
+fn check_no_parent_traversal(path: &Path, source: &str) -> Result<()> {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        bail!(
+            "{source} contains `..` parent-directory components ({}). \
+             Refusing to escape the project root.",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_rejects_parent_traversal_in_temp_path() {
+        let toml = r#"
+[output]
+temp_path = "../../etc/passwd"
+"#;
+        let cfg: Config = toml.parse().expect("parse");
+        let err = cfg.validate().expect_err("must reject ..");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("[output] temp_path"), "got: {msg}");
+        assert!(msg.contains(".."), "got: {msg}");
+    }
+
+    #[test]
+    fn validate_rejects_parent_traversal_in_cache_path() {
+        let toml = r#"
+[enrich.cache]
+path = "../../tmp/leak.json"
+"#;
+        let cfg: Config = toml.parse().expect("parse");
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_allows_absolute_paths() {
+        let toml = r#"
+[output]
+temp_path = "/tmp/repocontext_temp.md"
+final_path = "/tmp/repocontext.md"
+"#;
+        let cfg: Config = toml.parse().expect("parse");
+        cfg.validate().expect("absolute paths allowed");
+    }
+
+    #[test]
+    fn validate_allows_normal_relative_paths() {
+        let cfg = Config::default();
+        cfg.validate().expect("defaults must validate");
+    }
 
     #[test]
     fn empty_toml_uses_defaults() {
