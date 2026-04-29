@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.7
+#
+# CUDA-accelerated repocontext image. linux/amd64 only.
+# Multi-stage:
+#   1. builder — nvidia/cuda:devel + rustup, compiles llama.cpp with CUDA
+#                support (~10-20 min cold).
+#   2. runtime — nvidia/cuda:runtime — much smaller than -devel, ships the
+#                CUDA runtime libs llama.cpp links against.
+#
+# Run with --gpus all (requires the NVIDIA Container Toolkit on the host):
+#
+#   docker run --rm --gpus all \
+#     -v "$PWD:/workspace" \
+#     -v repocontext-cache:/root/.cache/repocontext \
+#     ghcr.io/looney2k/repocontext:cuda generate --enrich
+
+ARG CUDA_VERSION=12.4.1
+ARG UBUNTU_RELEASE=ubuntu22.04
+ARG RUST_TOOLCHAIN=1.82
+
+# ─── builder ───────────────────────────────────────────────────────────────
+FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_RELEASE} AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        curl \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup — the official rust:* image isn't CUDA-equipped,
+# so we layer Rust on top of nvidia/cuda:devel instead.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain ${RUST_TOOLCHAIN} --profile minimal
+
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY prompts ./prompts
+
+# Heavy: llama.cpp + CUDA kernels compile. ~10-20 min cold, cached afterwards.
+RUN cargo install \
+        --path crates/repocontext-cli \
+        --features inference-cuda \
+        --locked \
+        --root /usr/local
+
+# ─── runtime ───────────────────────────────────────────────────────────────
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-${UBUNTU_RELEASE}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/repocontext /usr/local/bin/repocontext
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/repocontext"]
+CMD ["--help"]

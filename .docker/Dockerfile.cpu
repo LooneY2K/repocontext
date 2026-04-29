@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+#
+# CPU-only repocontext image. Multi-stage:
+#   1. builder — Rust + C++ toolchain, compiles llama.cpp + the CLI (~5-15 min cold)
+#   2. runtime — debian:bookworm-slim + the runtime libraries llama.cpp links against
+#
+# Built and pushed for both linux/amd64 and linux/arm64 by .github/workflows/docker.yml.
+# arm64 builds run under QEMU emulation on free GHA runners (slow first build,
+# subsequent builds reuse the gha cache).
+#
+# At runtime the model file is NOT baked in. Mount a named volume at
+# /root/.cache/repocontext to persist the GGUF across runs:
+#
+#   docker run --rm \
+#     -v "$PWD:/workspace" \
+#     -v repocontext-cache:/root/.cache/repocontext \
+#     ghcr.io/looney2k/repocontext:cpu generate --enrich
+
+ARG RUST_VERSION=1
+ARG DEBIAN_RELEASE=bookworm
+
+# ─── builder ───────────────────────────────────────────────────────────────
+FROM rust:${RUST_VERSION}-slim-${DEBIAN_RELEASE} AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        pkg-config \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the workspace. .dockerignore keeps target/, .git/, etc. out of the context.
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY prompts ./prompts
+
+# Heavy: compiles llama.cpp from C++ source. ~5-15 min on first build,
+# cached layer afterwards. --locked enforces Cargo.lock reproducibility.
+RUN cargo install \
+        --path crates/repocontext-cli \
+        --features inference \
+        --locked \
+        --root /usr/local
+
+# ─── runtime ───────────────────────────────────────────────────────────────
+FROM debian:${DEBIAN_RELEASE}-slim
+
+# Runtime libs llama.cpp links against, plus CA certs so the model download
+# from Hugging Face works. No compiler in the runtime image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libstdc++6 \
+        libgomp1 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/repocontext /usr/local/bin/repocontext
+
+# Users mount their source tree here.
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/repocontext"]
+CMD ["--help"]

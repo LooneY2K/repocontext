@@ -71,6 +71,44 @@ repocontext generate --enrich
 
 The first run sends each chunk through the LLM and caches every response. Second run is instant — the cache serves everything without loading the model.
 
+## Run with Docker
+
+Prebuilt images on GHCR — skip the 5–15 minute `llama.cpp` compile.
+
+### CPU image (any Linux/Windows host)
+
+```sh
+docker pull ghcr.io/looney2k/repocontext:cpu
+
+# Stage 1 only
+docker run --rm -v "$PWD:/workspace" ghcr.io/looney2k/repocontext:cpu generate
+
+# Stage 2 with a persistent model + cache volume (model downloads on first run, ~4.5 GB)
+docker run --rm \
+  -v "$PWD:/workspace" \
+  -v repocontext-cache:/root/.cache/repocontext \
+  ghcr.io/looney2k/repocontext:cpu generate --enrich
+```
+
+### CUDA image (NVIDIA GPU)
+
+Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) on the host.
+
+```sh
+docker pull ghcr.io/looney2k/repocontext:cuda
+
+docker run --rm --gpus all \
+  -v "$PWD:/workspace" \
+  -v repocontext-cache:/root/.cache/repocontext \
+  ghcr.io/looney2k/repocontext:cuda generate --enrich
+```
+
+### Notes
+
+- The model file is *not* baked into the image. The first `--enrich` run downloads it to the `repocontext-cache` named volume; subsequent runs reuse it.
+- To pull the model explicitly before running enrich: `docker run --rm -v repocontext-cache:/root/.cache/repocontext ghcr.io/looney2k/repocontext:cpu model pull`
+- **Apple Silicon users:** install natively with `--features inference-metal` instead — Docker for Mac runs in a Linux VM and cannot expose Metal.
+
 ## Hardware requirements
 
 | Setup | RAM | Speed |

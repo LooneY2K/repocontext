@@ -1,0 +1,23 @@
+# Build outputs — would balloon the build context
+target/
+**/target/
+
+# Stage 1/2 outputs and cache — regenerated inside the container
+.repocontext/
+context_temp.md
+context.md
+
+# Locally-cached models (we never want these in an image)
+*.gguf
+
+# Repo metadata not needed by the build
+.git/
+.github/
+.claude/
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# Project's own README/LICENSE not needed for the binary build
+LICENSE
