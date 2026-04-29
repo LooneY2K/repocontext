@@ -49,7 +49,11 @@ jobs:
         with:
           context: .
           file: .docker/Dockerfile.cpu
-          platforms: linux/amd64,linux/arm64
+          # arm64 dropped: building llama.cpp under QEMU emulation on free
+          # GHA runners is OOM-prone and times out (>6h). Re-enable once we
+          # have native arm64 runners (paid tier) or a known-good
+          # cross-compile recipe.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

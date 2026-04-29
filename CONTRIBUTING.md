@@ -9,7 +9,7 @@ Thanks for your interest in contributing! This is a personal project, but PRs ar
 
 ## Development setup
 
-You need a Rust toolchain (stable, minimum **1.75**) and a C++ compiler (for building `llama.cpp` if you touch the inference path):
+You need a Rust toolchain (stable, minimum **1.86**) and a C++ compiler (for building `llama.cpp` if you touch the inference path):
 
 - macOS: `xcode-select --install`
 - Debian/Ubuntu: `sudo apt install build-essential cmake pkg-config`

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LooneY2K/repocontext/actions/workflows/ci.yml/badge.svg)](https://github.com/LooneY2K/repocontext/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86+-orange.svg)](https://www.rust-lang.org)
 
 > Turn any codebase into a rich AI-ready context document — locally, privately, in seconds.
 

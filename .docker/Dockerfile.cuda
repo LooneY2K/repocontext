@@ -16,15 +16,24 @@
 
 ARG CUDA_VERSION=12.4.1
 ARG UBUNTU_RELEASE=ubuntu22.04
-ARG RUST_TOOLCHAIN=1.82
+ARG RUST_TOOLCHAIN=1.86
 
 # ─── builder ───────────────────────────────────────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_RELEASE} AS builder
+
+# Re-declare build-args we need INSIDE the stage. ARGs declared before FROM
+# are only visible to FROM lines; they don't leak into RUN commands. Without
+# this, ${RUST_TOOLCHAIN} expanded to the empty string and rustup got
+# `--default-toolchain  --profile minimal`, which it parsed as "install
+# toolchain named --profile" — exit code 1.
+ARG RUST_TOOLCHAIN
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
         pkg-config \
+        clang \
+        libclang-dev \
         curl \
         git \
         ca-certificates \
@@ -36,7 +45,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain ${RUST_TOOLCHAIN} --profile minimal
+    | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}" --profile minimal
 
 WORKDIR /build
 

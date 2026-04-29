@@ -20,6 +20,10 @@ First public release.
 - **Docker images** at `ghcr.io/looney2k/repocontext:cpu` (multi-arch) and `:cuda` (linux/amd64).
 - **CLI commands.** `init`, `generate`, `check`, `extract`, `model {pull,list,remove}`.
 
+### Build
+
+- **MSRV: Rust 1.86.** Required by transitive dependencies (`clap`, `icu_*`); the previously declared 1.75 was never actually tested. CI now exercises the MSRV target on every push.
+
 ### Security
 
 - Model downloads are **HTTPS-only** and **SHA-256 verified** against a hash baked into the binary. Mismatches abort with an actionable error.
