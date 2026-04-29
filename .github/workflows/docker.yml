@@ -45,7 +45,7 @@ jobs:
             type=semver,pattern={{version}},suffix=-cpu
 
       - name: Build & push CPU image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: .docker/Dockerfile.cpu
@@ -87,7 +87,7 @@ jobs:
             type=semver,pattern={{version}},suffix=-cuda
 
       - name: Build & push CUDA image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: .docker/Dockerfile.cuda
