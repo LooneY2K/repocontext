@@ -29,12 +29,12 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_RELEASE} AS builder
 ARG RUST_TOOLCHAIN
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        --allow-change-held-packages \
         build-essential \
         cmake \
         pkg-config \
         clang \
         libclang-dev \
-        libnccl2 \
         libnccl-dev \
         curl \
         git \
@@ -75,11 +75,11 @@ RUN cargo install \
 # ─── runtime ───────────────────────────────────────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-${UBUNTU_RELEASE}
 
-# libnccl2 is dynamically linked into the binary at build time (see RUSTFLAGS
-# in the builder stage). Must also be present at runtime.
+# libnccl2 is already present in nvidia/cuda:runtime (NVIDIA pins it via an
+# apt hold — listing it here would make apt try to upgrade and fail). The
+# held version satisfies our dynamic-link target from the builder stage.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
-        libnccl2 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
