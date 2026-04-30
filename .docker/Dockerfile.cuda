@@ -28,14 +28,21 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU_RELEASE} AS builder
 # toolchain named --profile" — exit code 1.
 ARG RUST_TOOLCHAIN
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# NCCL: the base image holds libnccl2 at a CUDA-12.4-matched version, but
+# NVIDIA's apt repo has moved on to libnccl-dev built for CUDA 13.x. Asking
+# for `libnccl-dev` unqualified pulls the newer one, which then conflicts
+# with the held libnccl2. Pin libnccl-dev to *exactly* the libnccl2 version
+# already installed — that's guaranteed compatible.
+RUN apt-get update && \
+    NCCL_VERSION="$(dpkg-query --show --showformat='${Version}' libnccl2)" && \
+    apt-get install -y --no-install-recommends \
         --allow-change-held-packages \
         build-essential \
         cmake \
         pkg-config \
         clang \
         libclang-dev \
-        libnccl-dev \
+        "libnccl-dev=${NCCL_VERSION}" \
         curl \
         git \
         ca-certificates \
