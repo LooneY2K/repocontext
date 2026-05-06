@@ -42,7 +42,7 @@ streaming-iterator = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }
 indicatif = "0.17"
 dirs = "5"
-redis = { version = "0.27", features = ["json"] }
+redis = { version = "1.2", features = ["json"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 # llama-cpp-2 is wired in via the `inference` feature on repocontext-enrich.
